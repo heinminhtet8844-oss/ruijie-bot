@@ -11,8 +11,8 @@ import ddddocr
 import numpy as np
 import telebot
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"  # သင့် Bot Token ပြန်ထည့်ပါ
-ADMIN_ID = 123456789       # သင့် Chat ID ပြန်ထည့်ပါ
+BOT_TOKEN = "8801899210:AAG7tA3K0z847-DwOQC0M_goARef0rKmLok"  # သင့် Bot Token ပြန်ထည့်ပါ
+ADMIN_ID = 1901101365       # သင့် Chat ID ပြန်ထည့်ပါ
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
