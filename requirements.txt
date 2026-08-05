@@ -10,3 +10,11 @@ ddddocr-unofficial
 requests
 ping3
 pycryptodome
+pyTelegramBotAPI
+opencv-python-headless
+aiohttp
+ddddocr-unofficial
+requests
+ping3
+pycryptodome
+flask
