@@ -2,3 +2,4 @@ pyTelegramBotAPI
 opencv-python-headless
 aiohttp
 ddddocr-unofficial
+ping3
