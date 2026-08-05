@@ -3,3 +3,10 @@ opencv-python-headless
 aiohttp
 ddddocr-unofficial
 ping3
+pyTelegramBotAPI
+opencv-python-headless
+aiohttp
+ddddocr-unofficial
+requests
+ping3
+pycryptodome
